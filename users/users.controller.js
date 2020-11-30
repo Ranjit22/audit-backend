@@ -1,11 +1,38 @@
 ﻿const express = require('express');
 const router = express.Router();
 const userService = require('./user.service');
+const jwt = require('jsonwebtoken');
+const config = require('config.js');
+
+
+const authenticateJWT = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+
+    if (authHeader) {
+        const token = authHeader.split(' ')[1];
+
+        jwt.verify(token, config.secret, (err, user) => {
+            if (err) {
+                return res.sendStatus(403);
+            }
+
+            req.user = user;
+            if(user.role == "Auditor") {
+                next();
+            }  else {
+                res.sendStatus(401);
+            }
+        });
+    } else {
+        res.sendStatus(401);
+    }
+};
 
 // routes
 router.post('/authenticate', authenticate);
 router.post('/register', register);
-router.get('/', getAll);
+router.get('/audit',authenticateJWT, getAll);
+router.get('/logout', logout);
 router.get('/current', getCurrent);
 router.get('/:id', getById);
 router.put('/:id', update);
@@ -13,16 +40,34 @@ router.delete('/:id', _delete);
 
 module.exports = router;
 
+
+
+
 function authenticate(req, res, next) {
+    // console.log(req.ip)
     userService.authenticate(req.body)
-        .then(user => user ? res.json(user) : res.status(400).json({ message: 'Username or password is incorrect' }))
-        .catch(err => next(err));
+        .then(user => {
+            if(user){
+                req.body.loginTime = new Date()
+                req.body.clientIp = req.ip
+                user.role = req.body.role
+                userService.update(user._id,req.body).then( () => res.json(user)).catch(err => next(err));
+            } else {
+                res.status(400).json({ message: 'Username or password is incorrect' })
+            }
+        }).catch(err => next(err));
 }
 
 function register(req, res, next) {
     userService.create(req.body)
         .then(() => res.json({}))
         .catch(err => next(err));
+}
+
+function logout(req, res, next) {
+    req.body.logoutTime = new Date();
+    userService.update(req.user.sub,req.body).then( () => res.json()).catch(err => next(err));
+
 }
 
 function getAll(req, res, next) {
